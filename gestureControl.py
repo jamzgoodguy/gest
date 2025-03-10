@@ -42,22 +42,51 @@ class gestureControll():
         
         self.is_esc_pressed = False  # Tracking untuk tombol ESC
         
-        self.is_zooming = False
-        self.last_zoom_y = 0  # Untuk tracking pergerakan zoom
-        self.zoom_sensitivity = 0.5  # Seberapa sensitif zoom terhadap gerakan
+        
         
         self.is_right_click_pressed = False  # Tambahkan tracking untuk right click
         
         self.is_volume_active = False
         self.last_volume_y = 0
-        self.volume_sensitivity = 0.5
+        self.volume_sensitivity = 1
         
         self.is_system_active = False  # Default state inactive
         self.activation_cooldown = 1.0  # Cooldown 1 detik untuk toggle
         self.last_activation_time = 0
         self.last_deactivation_time = 0
         
+        self.is_two_hand_zooming = False
+        self.last_two_hand_distance = 0
+        self.two_hand_zoom_threshold = 2  # Minimal perubahan jarak untuk trigger zoom
+        self.block_mouse_movement = False  # Tambahkan flag untuk block mouse movement
+        
+        self.is_back_pressed = False
+        self.is_forward_pressed = False
+        
+        self.is_f_pressed = False  # Tambahkan tracking untuk tombol F
+        
+        self.is_scrolling = False
+        self.scroll_start_x = 0
+        self.scroll_start_y = 0
+        self.last_scroll_x = 0
+        self.last_scroll_y = 0
+        self.scroll_threshold = 10
+        self.scroll_speed = 4
+        self.scroll_multiplier = 5
+        
+        self.is_copy_pressed = False
+        self.is_paste_pressed = False
+        
+        self.is_alt_pressed = False
+        self.is_tab_pressed = False
+        
+        self.is_ctrl_pressed = False
+        
     def mouseMovement(self, x:int, y:int):
+        # Skip mouse movement jika two hand zoom aktif atau Alt aktif
+        if self.block_mouse_movement or self.is_alt_pressed:
+            return
+            
         try:
             # Konversi koordinat kamera ke koordinat seluruh layar
             # Gunakan range yang lebih kecil (100-540 untuk x, 100-380 untuk y)
@@ -188,34 +217,7 @@ class gestureControll():
             pygui.keyUp('esc')
             self.is_esc_pressed = False
 
-    def handleZoom(self, y_pos):
-        if not self.is_zooming:
-            self.last_zoom_y = y_pos
-            self.is_zooming = True
-            return
-        
-        # Hitung perubahan posisi Y
-        y_diff = y_pos - self.last_zoom_y  # Ubah urutan pengurangan
-        
-        # Jika bergerak ke atas (y_diff < 0) = zoom in
-        # Jika bergerak ke bawah (y_diff > 0) = zoom out
-        if abs(y_diff) > 10:  # Threshold minimal pergerakan
-            if y_diff < 0:  # Bergerak ke atas
-                # Zoom in (Ctrl + Plus)
-                pygui.keyDown('ctrl')
-                pygui.press('+')
-                pygui.keyUp('ctrl')
-            else:  # Bergerak ke bawah
-                # Zoom out (Ctrl + Minus)
-                pygui.keyDown('ctrl')
-                pygui.press('-')
-                pygui.keyUp('ctrl')
-            
-            self.last_zoom_y = y_pos  # Update posisi terakhir
-
-    def releaseZoom(self):
-        self.is_zooming = False
-        self.last_zoom_y = 0
+    
 
     def pressRightClick(self):
         if not self.is_right_click_pressed:
@@ -261,19 +263,203 @@ class gestureControll():
     def deactivateSystem(self):
         current_time = time.time()
         if self.is_system_active and current_time - self.last_deactivation_time >= self.activation_cooldown:
-            self.is_system_active = False
-            self.last_deactivation_time = current_time
-            self.releaseAllControls()
+            try:
+                # Release semua kontrol sebelum deaktivasi
+                self.releaseAllControls()
+                # Set status sistem
+                self.is_system_active = False
+                self.last_deactivation_time = current_time
+            except Exception as e:
+                print(f"Error in deactivateSystem: {e}")
 
     def releaseAllControls(self):
-        # Release semua kontrol saat sistem dinonaktifkan
-        self.releaseLeftClick()
-        self.releaseRightClick()
-        self.releaseClick()  # untuk middle click
-        self.releaseEsc()
-        self.releaseZoom()
-        self.releaseVolume()
-        self.releasePrintScreen()
-        self.prev_x = 0
-        self.prev_y = 0
+        try:
+            # Release keyboard controls
+            if self.is_ctrl_pressed:
+                pygui.keyUp('ctrl')
+            if self.is_alt_pressed:
+                pygui.keyUp('alt')
+            if self.is_tab_pressed:
+                pygui.keyUp('tab')
+            
+            # Release mouse controls
+            if self.is_left_click_pressed:
+                pygui.mouseUp(button='left')
+            if self.is_right_click_pressed:
+                pygui.mouseUp(button='right')
+            
+            # Reset all flags
+            self.is_ctrl_pressed = False
+            self.is_alt_pressed = False
+            self.is_tab_pressed = False
+            self.is_left_click_pressed = False
+            self.is_right_click_pressed = False
+            self.is_dragging = False
+            self.is_scrolling = False
+            self.is_two_hand_zooming = False
+            self.block_mouse_movement = False
+            
+            # Reset all positions
+            self.prev_x = 0
+            self.prev_y = 0
+            self.last_scroll_x = 0
+            self.last_scroll_y = 0
+            self.last_two_hand_distance = 0
+            
+        except Exception as e:
+            print(f"Error in releaseAllControls: {e}")
 
+    def handleTwoHandZoom(self, distance):
+        if not self.is_two_hand_zooming:
+            self.last_two_hand_distance = distance
+            self.is_two_hand_zooming = True
+            self.block_mouse_movement = True  # Block mouse movement saat zoom aktif
+            return
+        
+        # Hitung perubahan jarak
+        distance_diff = distance - self.last_two_hand_distance
+        
+        # Jika jarak bertambah (menjauh) = zoom in
+        # Jika jarak berkurang (mendekat) = zoom out
+        if abs(distance_diff) > self.two_hand_zoom_threshold:
+            if distance_diff > 0:  # Menjauh
+                # Zoom in (Ctrl + Plus)
+                pygui.keyDown('ctrl')
+                pygui.press('+')
+                pygui.keyUp('ctrl')
+            else:  # Mendekat
+                # Zoom out (Ctrl + Minus)
+                pygui.keyDown('ctrl')
+                pygui.press('-')
+                pygui.keyUp('ctrl')
+            
+            self.last_two_hand_distance = distance
+
+    def releaseTwoHandZoom(self):
+        self.is_two_hand_zooming = False
+        self.last_two_hand_distance = 0
+        self.block_mouse_movement = False  # Aktifkan kembali mouse movement saat zoom selesai
+
+    def pressBackButton(self):
+        if not self.is_back_pressed:
+            pygui.press('browserback')  # Simulasi tombol back browser
+            self.is_back_pressed = True
+
+    def releaseBackButton(self):
+        if self.is_back_pressed:
+            self.is_back_pressed = False
+
+    def pressForwardButton(self):
+        if not self.is_forward_pressed:
+            pygui.press('browserforward')  # Simulasi tombol forward browser
+            self.is_forward_pressed = True
+
+    def releaseForwardButton(self):
+        if self.is_forward_pressed:
+            self.is_forward_pressed = False
+
+    def pressF(self):
+        if not self.is_f_pressed:
+            pygui.press('f')
+            self.is_f_pressed = True
+    
+    def releaseF(self):
+        if self.is_f_pressed:
+            self.is_f_pressed = False
+
+    def handleScroll(self, x_pos, y_pos):
+        if not self.is_scrolling:
+            # Simpan posisi awal saat gesture pertama kali diaktifkan
+            self.scroll_start_x = x_pos
+            self.scroll_start_y = y_pos
+            self.last_scroll_x = x_pos
+            self.last_scroll_y = y_pos
+            self.is_scrolling = True
+            return
+        
+        # Hitung perubahan posisi dari titik awal
+        x_diff = x_pos - self.scroll_start_x
+        y_diff = y_pos - self.scroll_start_y
+        
+        # Tentukan arah scroll berdasarkan pergerakan yang lebih dominan
+        if abs(x_diff) > abs(y_diff):  # Scroll horizontal
+            if abs(x_diff) > self.scroll_threshold:
+                scroll_amount = (abs(x_diff) // self.scroll_threshold) * self.scroll_speed * self.scroll_multiplier
+                pygui.keyDown('shift')  # Tahan tombol shift untuk horizontal scroll
+                if x_diff > 0:  # Scroll kanan
+                    pygui.scroll(scroll_amount)
+                else:  # Scroll kiri
+                    pygui.scroll(-scroll_amount)
+                pygui.keyUp('shift')
+                # Update hanya last_scroll, bukan titik awal
+                self.last_scroll_x = x_pos
+        else:  # Scroll vertical
+            if abs(y_diff) > self.scroll_threshold:
+                scroll_amount = (abs(y_diff) // self.scroll_threshold) * self.scroll_speed * self.scroll_multiplier
+                if y_diff > 0:  # Scroll bawah
+                    pygui.scroll(-scroll_amount)
+                else:  # Scroll atas
+                    pygui.scroll(scroll_amount)
+                # Update hanya last_scroll, bukan titik awal
+                self.last_scroll_y = y_pos
+
+    def releaseScroll(self):
+        self.is_scrolling = False
+        self.scroll_start_x = 0  # Reset titik awal
+        self.scroll_start_y = 0
+        self.last_scroll_x = 0
+        self.last_scroll_y = 0
+
+    def pressCopy(self):
+        if not self.is_copy_pressed:
+            pygui.hotkey('ctrl', 'c')
+            self.is_copy_pressed = True
+    
+    def releaseCopy(self):
+        if self.is_copy_pressed:
+            self.is_copy_pressed = False
+
+    def pressPaste(self):
+        if not self.is_paste_pressed:
+            pygui.hotkey('ctrl', 'v')
+            self.is_paste_pressed = True
+    
+    def releasePaste(self):
+        if self.is_paste_pressed:
+            self.is_paste_pressed = False
+
+    def pressAlt(self):
+        if not self.is_alt_pressed:
+            pygui.keyDown('alt')
+            self.is_alt_pressed = True
+    
+    def releaseAlt(self):
+        if self.is_alt_pressed:
+            pygui.keyUp('alt')
+            self.is_alt_pressed = False
+
+    def pressTab(self):
+        if not self.is_tab_pressed:
+            pygui.press('tab')
+            self.is_tab_pressed = True
+    
+    def releaseTab(self):
+        if self.is_tab_pressed:
+            self.is_tab_pressed = False
+
+    def pressCtrl(self):
+        if not self.is_ctrl_pressed:
+            # Pastikan Alt dan Win key tidak aktif
+            pygui.keyUp('alt')  # Release Alt key jika masih tertahan
+            pygui.keyUp('win')  # Release Win key jika masih tertahan
+            #time.sleep(0.1)     # Tunggu sebentar
+            pygui.keyDown('ctrl')
+            self.is_ctrl_pressed = True
+        
+    def releaseCtrl(self):
+        if self.is_ctrl_pressed:
+            pygui.keyUp('ctrl')
+            #time.sleep(0.1)     # Tunggu sebentar setelah release
+            self.is_ctrl_pressed = False
+
+    
